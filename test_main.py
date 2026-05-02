@@ -1,0 +1,497 @@
+"""
+Automated Test Suite for Food Tray Recognition System
+Uses the actual Hugging Face API endpoint
+"""
+
+import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
+import io
+import json
+from unittest.mock import patch, Mock
+import sys
+import os
+
+# Add parent directory to path to import app
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app import app
+
+# Create test client
+client = TestClient(app)
+
+# ========== FIXTURES ==========
+
+@pytest.fixture
+def sample_image():
+    """Create a simple test image (blank white image)"""
+    img = Image.new('RGB', (640, 480), color='white')
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='JPEG')
+    img_byte_arr.seek(0)
+    return img_byte_arr
+
+@pytest.fixture
+def sample_image_with_food():
+    """Create a mock image that would contain food"""
+    img = Image.new('RGB', (640, 480), color='lightgray')
+    # Draw some circles to simulate food items
+    from PIL import ImageDraw
+    draw = ImageDraw.Draw(img)
+    draw.ellipse([100, 100, 200, 200], fill='brown')  # Idly
+    draw.ellipse([300, 100, 400, 200], fill='brown')  # Another idly
+    draw.ellipse([200, 250, 280, 330], fill='golden')  # Vada
+    
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='JPEG')
+    img_byte_arr.seek(0)
+    return img_byte_arr
+
+@pytest.fixture
+def sample_customer():
+    """Sample customer data for testing"""
+    return {
+        "first_name": "Test",
+        "last_name": "User",
+        "google_id": "test_google_123",
+        "phone": "+1234567890"
+    }
+
+@pytest.fixture
+def sample_order():
+    """Sample order data"""
+    return {
+        "order_code": "ORD_TEST_001",
+        "customer_id": "test_cust_123",
+        "items": '[{"name":"Idly","quantity":2,"price":30}]',
+        "subtotal": 60.0,
+        "total": 60.0,
+        "payment_method": "google_pay"
+    }
+
+# ========== TEST HEALTH AND FRONTEND ==========
+
+class TestHealthAndFrontend:
+    """Test basic server functionality"""
+    
+    def test_health_check(self):
+        """Test health check endpoint"""
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+    
+    def test_homepage_served(self):
+        """Test if index.html is served correctly"""
+        response = client.get("/")
+        # Either returns HTML or API info
+        assert response.status_code in [200, 404]
+        if response.status_code == 200:
+            content_type = response.headers.get("content-type", "")
+            assert "text/html" in content_type or "application/json" in content_type
+
+# ========== TEST AI DETECTION (Using Real API) ==========
+
+class TestAIDetection:
+    """Test food detection with actual HF API"""
+    
+    def test_detect_endpoint_with_real_image(self, sample_image_with_food):
+        """Test food detection with a real image (uses your HF API)"""
+        files = {"file": ("test_tray.jpg", sample_image_with_food, "image/jpeg")}
+        response = client.post("/detect", files=files)
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "success" in data
+        assert "items" in data
+        assert isinstance(data["items"], list)
+        
+        # Check item structure if any items detected
+        if data["items"]:
+            first_item = data["items"][0]
+            assert "label" in first_item
+            assert "quantity" in first_item
+    
+    def test_detect_endpoint_invalid_file(self):
+        """Test detection with invalid file type"""
+        files = {"file": ("test.txt", b"not an image", "text/plain")}
+        response = client.post("/detect", files=files)
+        assert response.status_code == 400
+        assert "image" in response.json()["detail"].lower()
+    
+    def test_detect_endpoint_no_file(self):
+        """Test detection with no file"""
+        response = client.post("/detect")
+        assert response.status_code == 422  # Unprocessable Entity
+
+# ========== TEST ADMIN ENDPOINTS ==========
+
+class TestAdminEndpoints:
+    """Test admin authentication and management"""
+    
+    @patch('app.db_get')
+    def test_admin_login_success(self, mock_db_get):
+        """Test successful admin login"""
+        mock_db_get.return_value = [{
+            "id": 1,
+            "username": "test_admin",
+            "full_name": "Test Admin",
+            "password": "test_pass123"
+        }]
+        
+        response = client.post("/admin/login", json={
+            "username": "test_admin",
+            "password": "test_pass123"
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] == True
+        assert data["username"] == "test_admin"
+        assert "admin_id" in data
+    
+    @patch('app.db_get')
+    def test_admin_login_failure(self, mock_db_get):
+        """Test admin login with wrong credentials"""
+        mock_db_get.return_value = []
+        
+        response = client.post("/admin/login", json={
+            "username": "wrong_user",
+            "password": "wrong_pass"
+        })
+        
+        assert response.status_code == 401
+        assert "Invalid credentials" in response.json()["detail"]
+    
+    @patch('app.db_get')
+    @patch('app.db_post')
+    def test_admin_register_success(self, mock_db_post, mock_db_get):
+        """Test successful admin registration"""
+        mock_db_get.return_value = []
+        mock_db_post.return_value = [{"id": 1}]
+        
+        response = client.post("/admin/register", json={
+            "username": "new_admin",
+            "password": "new_pass123",
+            "full_name": "New Admin",
+            "admin_key": "123"
+        })
+        
+        assert response.status_code == 200
+        assert response.json()["success"] == True
+    
+    @patch('app.db_get')
+    def test_admin_register_wrong_key(self, mock_db_get):
+        """Test admin registration with wrong admin key"""
+        response = client.post("/admin/register", json={
+            "username": "hacker",
+            "password": "hack123",
+            "full_name": "Hacker",
+            "admin_key": "wrong_key"
+        })
+        
+        assert response.status_code == 403
+        assert "Invalid admin key" in response.json()["detail"]
+
+# ========== TEST CUSTOMER ENDPOINTS ==========
+
+class TestCustomerEndpoints:
+    """Test customer check-in and management"""
+    
+    @patch('app.db_get')
+    @patch('app.db_post')
+    def test_customer_checkin_new(self, mock_db_post, mock_db_get):
+        """Test new customer check-in"""
+        mock_db_get.return_value = []
+        mock_db_post.return_value = [{"id": "new_cust_123", "first_name": "John"}]
+        
+        response = client.post("/customer/checkin", json={
+            "first_name": "John",
+            "last_name": "Doe",
+            "google_id": "google_123",
+            "phone": "+9876543210"
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "customer_id" in data
+        assert data["returning"] == False
+    
+    @patch('app.db_get')
+    def test_customer_checkin_returning(self, mock_db_get):
+        """Test returning customer check-in"""
+        mock_db_get.return_value = [{"id": "existing_cust_456", "first_name": "Jane"}]
+        
+        response = client.post("/customer/checkin", json={
+            "first_name": "Jane",
+            "last_name": "Smith",
+            "google_id": "google_456",
+            "phone": "+5555555555"
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["customer_id"] == "existing_cust_456"
+        assert data["returning"] == True
+
+# ========== TEST ORDER ENDPOINTS ==========
+
+class TestOrderEndpoints:
+    """Test order creation and retrieval"""
+    
+    @patch('app.db_post')
+    def test_save_order_success(self, mock_db_post):
+        """Test successful order saving"""
+        mock_db_post.return_value = [{"id": "order_789"}]
+        
+        order_data = {
+            "order_code": "ORD_2024_001",
+            "customer_id": "cust_123",
+            "items": '[{"name":"Idly","quantity":2}]',
+            "subtotal": 60.0,
+            "total": 60.0,
+            "payment_method": "cash"
+        }
+        
+        response = client.post("/orders", json=order_data)
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] == True
+        assert "order_id" in data
+    
+    @patch('app.db_get')
+    def test_get_all_orders(self, mock_db_get):
+        """Test retrieving all orders"""
+        mock_db_get.return_value = [
+            {
+                "id": 1,
+                "order_code": "ORD_001",
+                "total": 150.0,
+                "customers": {"first_name": "John", "last_name": "Doe"}
+            }
+        ]
+        
+        response = client.get("/orders")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "orders" in data
+        assert isinstance(data["orders"], list)
+    
+    @patch('app.db_get')
+    def test_get_customer_orders(self, mock_db_get):
+        """Test retrieving orders for specific customer"""
+        mock_db_get.return_value = [
+            {"id": 1, "order_code": "ORD_001", "total": 150.0}
+        ]
+        
+        response = client.get("/orders/customer/cust_123")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "orders" in data
+
+# ========== TEST MENU ENDPOINTS ==========
+
+class TestMenuEndpoints:
+    """Test menu management"""
+    
+    @patch('app.db_get')
+    def test_get_menu(self, mock_db_get):
+        """Test retrieving menu items"""
+        mock_db_get.return_value = [
+            {"id": 1, "name": "Idly", "price": 30, "category": "Breakfast"},
+            {"id": 2, "name": "Vada", "price": 20, "category": "Snacks"}
+        ]
+        
+        response = client.get("/menu")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+        assert len(data["items"]) == 2
+    
+    @patch('app.db_get')
+    def test_get_menu_by_category(self, mock_db_get):
+        """Test retrieving menu items filtered by category"""
+        mock_db_get.return_value = [
+            {"id": 1, "name": "Idly", "price": 30, "category": "Breakfast"}
+        ]
+        
+        response = client.get("/menu?category=Breakfast")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+    
+    @patch('app.db_get')
+    def test_get_single_menu_item(self, mock_db_get):
+        """Test retrieving a single menu item"""
+        mock_db_get.return_value = [
+            {"id": 1, "name": "Idly", "price": 30, "category": "Breakfast"}
+        ]
+        
+        response = client.get("/menu/1")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "item" in data
+        assert data["item"]["name"] == "Idly"
+    
+    @patch('app.db_get')
+    @patch('app.db_post')
+    def test_add_menu_item(self, mock_db_post, mock_db_get):
+        """Test adding new menu item"""
+        mock_db_get.return_value = []  # No existing item
+        mock_db_post.return_value = [{"id": 3, "name": "Dosa", "price": 50}]
+        
+        new_item = {
+            "name": "Dosa",
+            "price": 50.0,
+            "category": "Breakfast",
+            "emoji": "🥞",
+            "ai_label": "dosa",
+            "status": "active"
+        }
+        
+        response = client.post("/menu", json=new_item)
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] == True
+    
+    @patch('requests.patch')
+    def test_update_menu_item(self, mock_patch):
+        """Test updating menu item"""
+        mock_patch.return_value.status_code = 200
+        mock_patch.return_value.json.return_value = {}
+        
+        response = client.put("/menu/1", json={"price": 45.0})
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] == True
+
+# ========== TEST ANALYTICS ENDPOINTS ==========
+
+class TestAnalytics:
+    """Test analytics endpoints"""
+    
+    @patch('app.db_get')
+    def test_sales_summary(self, mock_db_get):
+        """Test sales summary endpoint"""
+        from datetime import datetime, timedelta
+        
+        mock_db_get.return_value = [
+            {"total": 150.0, "created_at": datetime.now().isoformat()},
+            {"total": 200.0, "created_at": datetime.now().isoformat()}
+        ]
+        
+        response = client.get("/analytics/sales?days=7")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "total_sales" in data
+        assert "order_count" in data
+        assert "average_order" in data
+
+# ========== INTEGRATION TESTS ==========
+
+class TestIntegrationFlows:
+    """Test complete user journeys"""
+    
+    @patch('app.db_get')
+    @patch('app.db_post')
+    @patch('app.detect_food_items')
+    def test_complete_billing_flow(self, mock_detect, mock_db_post, mock_db_get, sample_image_with_food):
+        """Test complete flow: detect -> create order -> save"""
+        
+        # Step 1: Detect food items (mock the HF API call)
+        mock_detect.return_value = {
+            "idly": 2,
+            "vada": 1,
+            "coffee": 1
+        }
+        
+        files = {"file": ("tray.jpg", sample_image_with_food, "image/jpeg")}
+        detect_response = client.post("/detect", files=files)
+        
+        assert detect_response.status_code == 200
+        detected_items = detect_response.json()["items"]
+        assert len(detected_items) > 0
+        
+        # Step 2: Create customer
+        mock_db_get.return_value = []
+        mock_db_post.return_value = [{"id": "new_cust_001", "first_name": "Test"}]
+        
+        customer_response = client.post("/customer/checkin", json={
+            "first_name": "Test",
+            "last_name": "Customer",
+            "google_id": "flow_test_123",
+            "phone": "+1111111111"
+        })
+        
+        assert customer_response.status_code == 200
+        customer_id = customer_response.json()["customer_id"]
+        
+        # Step 3: Save order
+        mock_db_post.return_value = [{"id": "order_001"}]
+        
+        order_response = client.post("/orders", json={
+            "order_code": "FLOW_TEST_001",
+            "customer_id": customer_id,
+            "items": json.dumps(detected_items),
+            "subtotal": 110.0,
+            "total": 110.0,
+            "payment_method": "testing"
+        })
+        
+        assert order_response.status_code == 200
+        assert order_response.json()["success"] == True
+        
+        print("✅ Complete billing flow test passed!")
+    
+    def test_api_cors_headers(self):
+        """Test CORS headers are properly set"""
+        response = client.options("/health")
+        assert "access-control-allow-origin" in response.headers
+
+# ========== PERFORMANCE TESTS ==========
+
+class TestPerformance:
+    """Basic performance tests"""
+    
+    @patch('app.db_get')
+    def test_response_time(self, mock_db_get):
+        """Test API response times are reasonable"""
+        import time
+        
+        mock_db_get.return_value = [{"id": 1, "name": "Test Item"}]
+        
+        start_time = time.time()
+        response = client.get("/menu")
+        end_time = time.time()
+        
+        assert response.status_code == 200
+        response_time = (end_time - start_time) * 1000
+        assert response_time < 1000, f"Response time {response_time:.2f}ms > 1000ms"
+        print(f"✅ Response time: {response_time:.2f}ms")
+
+# ========== RUNNER FUNCTION FOR CI/CD ==========
+
+def run_tests_with_coverage():
+    """Run tests with coverage report (for GitHub Actions)"""
+    import pytest
+    exit_code = pytest.main([
+        "tests/test_main.py",
+        "-v",
+        "--tb=short",
+        "--maxfail=1",
+        "--disable-warnings"
+    ])
+    return exit_code
+
+if __name__ == "__main__":
+    exit_code = run_tests_with_coverage()
+    sys.exit(exit_code)

@@ -1,0 +1,254 @@
+# .github/workflows/deploy.yml
+name: CI/CD Pipeline for Food Tray Recognition
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  DOCKER_IMAGE: food-tray-app
+  DOCKER_TAG: latest
+  AWS_REGION: ap-south-1
+
+jobs:
+  # ========== CI PHASE ==========
+  ci:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # Step 1: Code pulled from GitHub
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # Step 2: Python environment created
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+    
+    # Step 3: Dependencies installed
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    # Step 4: Tests executed (test_main.py)
+    - name: Run tests
+      run: |
+        pytest test_main.py -v --tb=short --maxfail=1 --disable-warnings
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        HF_API_URL: ${{ secrets.HF_API_URL }}
+    
+    # Step 5: Docker image built
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} .
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }} .
+    
+    # Step 6: Image pushed to Docker Hub
+    - name: Push Docker image to Docker Hub
+      run: |
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+    
+    # Optional: Upload test results
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: |
+          .pytest_cache
+          *.xml
+
+  # ========== CD PHASE ==========
+  cd:
+    needs: ci  # Only runs if CI passes
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+    # Step 7: GitHub Actions SSH into EC2 & Deploy
+    - name: Deploy to EC2 with CloudWatch Logs
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        port: 22
+        script: |
+          #!/bin/bash
+          set -e
+          
+          echo "=========================================="
+          echo "🚀 Starting deployment to EC2"
+          echo "=========================================="
+          echo "Time: $(date)"
+          echo "Host: $(hostname)"
+          
+          # Set variables
+          IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
+          CONTAINER_NAME="food-tray-backend"
+          AWS_REGION="${{ env.AWS_REGION }}"
+          LOG_GROUP="fastapi-app-logs"
+          LOG_STREAM="fastapi-container-$(date +%Y%m%d-%H%M%S)"
+          
+          # Step 8: EC2 pulls latest Docker image
+          echo "📥 Pulling latest Docker image: $IMAGE_NAME"
+          docker pull $IMAGE_NAME
+          
+          # Step 9: Old container stopped
+          echo "🛑 Stopping old container: $CONTAINER_NAME"
+          docker stop $CONTAINER_NAME 2>/dev/null || true
+          docker rm $CONTAINER_NAME 2>/dev/null || true
+          
+          # Create log directory for CloudWatch agent (if needed)
+          mkdir -p /var/log/fastapi-app
+          
+          # Step 10: New container started with CloudWatch logging
+          echo "🚀 Starting new container with CloudWatch logging..."
+          
+          # Check if CloudWatch agent is installed, if not install it
+          if ! command -v awslogs &> /dev/null; then
+            echo "📦 Installing awslogs driver..."
+            docker plugin install --grant-all-permissions \
+              docker/awslogs:latest || true
+          fi
+          
+          # Run container with CloudWatch logging
+          docker run -d \
+            --name $CONTAINER_NAME \
+            --restart unless-stopped \
+            -p 8000:8000 \
+            --log-driver=awslogs \
+            --log-opt awslogs-region=$AWS_REGION \
+            --log-opt awslogs-group=$LOG_GROUP \
+            --log-opt awslogs-stream=$LOG_STREAM \
+            --log-opt awslogs-create-group=true \
+            --log-opt tag="fastapi-app" \
+            -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+            -e SUPABASE_KEY="${{ secrets.SUPABASE_KEY }}" \
+            -e HF_API_URL="${{ secrets.HF_API_URL }}" \
+            -e AWS_REGION="$AWS_REGION" \
+            -e ENVIRONMENT="production" \
+            $IMAGE_NAME
+          
+          # Wait for container to be ready
+          echo "⏳ Waiting for container to be ready..."
+          sleep 5
+          
+          # Verify container is running
+          echo "✅ Verifying container status..."
+          if docker ps | grep -q $CONTAINER_NAME; then
+            echo "✅ Container is running successfully!"
+            echo ""
+            echo "Container Details:"
+            echo "  Name: $CONTAINER_NAME"
+            echo "  Image: $IMAGE_NAME"
+            echo "  Ports: 8000:8000"
+            echo "  Log Driver: awslogs"
+            echo "  Log Group: $LOG_GROUP"
+            echo "  Log Stream: $LOG_STREAM"
+            echo "  Region: $AWS_REGION"
+            echo ""
+            
+            # Test health endpoint
+            echo "🔍 Testing health endpoint..."
+            HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health)
+            if [ "$HEALTH_CHECK" == "200" ]; then
+              echo "✅ Health check passed! (HTTP $HEALTH_CHECK)"
+            else
+              echo "⚠️  Health check failed (HTTP $HEALTH_CHECK), but container is running"
+            fi
+            
+            echo ""
+            echo "📊 To view logs, run:"
+            echo "   docker logs $CONTAINER_NAME"
+            echo ""
+            echo "☁️  To view CloudWatch logs:"
+            echo "   aws logs tail /aws/ec2/container-insights --region $AWS_REGION"
+            echo ""
+            echo "=========================================="
+            echo "✅ Deployment completed successfully!"
+            echo "=========================================="
+          else
+            echo "❌ Container failed to start!"
+            echo ""
+            echo "Container logs:"
+            docker logs $CONTAINER_NAME --tail 50
+            exit 1
+          fi
+          
+          # Clean up old images
+          echo "🧹 Cleaning up old Docker images..."
+          docker image prune -f
+          
+          # Show running containers
+          echo ""
+          echo "📋 Currently running containers:"
+          docker ps --filter "name=$CONTAINER_NAME"
+    
+    # Step 11: Verify deployment from GitHub side
+    - name: Verify Deployment
+      run: |
+        echo "=========================================="
+        echo "🔍 Verifying deployment from GitHub..."
+        echo "=========================================="
+        sleep 10
+        MAX_RETRIES=5
+        RETRY_COUNT=0
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.EC2_HOST }}:8000/health || echo "000")
+          if [ "$HTTP_CODE" == "200" ]; then
+            echo "✅ Deployment verified! API is healthy (HTTP $HTTP_CODE)"
+            exit 0
+          fi
+          RETRY_COUNT=$((RETRY_COUNT+1))
+          echo "⏳ Waiting for API to be ready... (Attempt $RETRY_COUNT/$MAX_RETRIES)"
+          sleep 5
+        done
+        echo "❌ Deployment verification failed. API not responding."
+        exit 1
+
+  # Optional: Send notifications
+  notify:
+    needs: [ci, cd]
+    runs-on: ubuntu-latest
+    if: always() && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Deployment Status
+      run: |
+        echo "=========================================="
+        if [ "${{ needs.cd.result }}" == "success" ]; then
+          echo "✅ DEPLOYMENT SUCCESSFUL!"
+          echo "   API URL: http://${{ secrets.EC2_HOST }}:8000"
+          echo "   Health Check: http://${{ secrets.EC2_HOST }}:8000/health"
+          echo "   Time: $(date)"
+        else
+          echo "❌ DEPLOYMENT FAILED!"
+          echo "   Check GitHub Actions logs for details."
+          exit 1
+        fi
+        echo "=========================================="
