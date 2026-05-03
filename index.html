@@ -2338,6 +2338,7 @@
     // ================================================================
 
     const ADMIN_SECRET_KEY = '123';
+    const API_BASE = window.location.origin;
 
 
     // ================================================================
@@ -2427,7 +2428,7 @@
 
       // ── NEW: save customer to Supabase ──
       try {
-        const res = await fetch('http://localhost:8000/customer/checkin', {
+        const res = await fetch(API_BASE + '/customer/checkin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2482,7 +2483,7 @@
 
       // ── NEW: register via Supabase ──
       try {
-        const res = await fetch('http://localhost:8000/admin/register', {
+        const res = await fetch(API_BASE + '/admin/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password, full_name: fullName, admin_key: adminKey })
@@ -2515,7 +2516,7 @@
 
       // ── NEW: check against Supabase instead of hardcoded object ──
       try {
-        const res = await fetch('http://localhost:8000/admin/login', {
+        const res = await fetch(API_BASE + '/admin/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password })
@@ -2749,7 +2750,7 @@
       try {
         const formData = new FormData();
         formData.append('file', document.getElementById('file-input').files[0]);
-        const res = await fetch('http://localhost:8000/detect', {
+        const res = await fetch(API_BASE + '/detect', {
           method: 'POST',
           body: formData
         });
@@ -2955,7 +2956,7 @@
 
       // ── NEW: save order to Supabase ──
       if (currentUser.customerId) {
-        fetch('http://localhost:8000/orders', {
+        fetch(API_BASE + '/orders', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
