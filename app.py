@@ -104,8 +104,8 @@ async def log_requests(request: Request, call_next):
 
 # ========== SUPABASE CONFIGURATION ==========
 # Read secrets from environment variables (never hardcode keys)
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://bwgnfecyvfuburdiwbiv.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3Z25mZWN5dmZ1YnVyZGl3Yml2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3MTcxNTAsImV4cCI6MjA5MzI5MzE1MH0.qRQTYD2dW0PWUNhozwZHEAVSJlUSUiRqCYmjvU7eTTs")
 HF_API_URL = os.getenv("HF_API_URL", "https://raoghulam-food-detection-api.hf.space/predict")
 
 HEADERS = {
@@ -169,26 +169,15 @@ def db_post(table, data):
 
 
 def detect_food_items(image_path: str) -> Dict[str, int]:
-    """Call Hugging Face API for food detection with detailed logging"""
     ai_logger.info(f"🔍 Starting food detection | image={os.path.basename(image_path)}")
-    start_time = time.time()
-
-    file_size = os.path.getsize(image_path) if os.path.exists(image_path) else 0
-    ai_logger.debug(f"📁 Image details | path={image_path} | size={file_size/1024:.2f}KB")
-
+    
     try:
         with open(image_path, "rb") as f:
-            ai_logger.debug(f"📤 Sending request to HF API | url={HF_API_URL}")
-            api_start = time.time()
-
             response = requests.post(
                 HF_API_URL,
                 files={"file": f},
                 timeout=30
             )
-
-            api_duration = (time.time() - api_start) * 1000
-            ai_logger.debug(f"📥 HF API response | status={response.status_code} | duration={api_duration:.2f}ms")
 
         if response.status_code == 200:
             result = response.json()
@@ -196,55 +185,35 @@ def detect_food_items(image_path: str) -> Dict[str, int]:
 
             counts = {}
 
-            if isinstance(result, list):
-                for detection in result:
-                    label = detection.get("label", detection.get("class", "unknown"))
-                    confidence = detection.get("confidence", 0)
-                    counts[label] = counts.get(label, 0) + 1
-                    ai_logger.debug(f"   Detected: {label} (conf={confidence})")
-
-            elif isinstance(result, dict):
-                if all(isinstance(v, int) for v in result.values()):
+            if isinstance(result, dict):
+                if "detections" in result and isinstance(result["detections"], dict):
+                    # ✅ Your API format: {'success': True, 'detections': {'pizza': 2, 'burger': 1}}
+                    counts = result["detections"]
+                elif all(isinstance(v, int) for v in result.values()):
                     counts = result
                 elif "predictions" in result:
                     for pred in result["predictions"]:
-                        label = pred.get("label", pred.get("class", "unknown"))
+                        label = pred.get("label", "unknown")
                         counts[label] = counts.get(label, 0) + 1
-                elif "detections" in result:
-                    for det in result["detections"]:
-                        label = det.get("label", det.get("class", "unknown"))
-                        counts[label] = counts.get(label, 0) + 1
-            else:
-                if isinstance(result, list) and all(isinstance(x, str) for x in result):
-                    for item in result:
-                        counts[item] = counts.get(item, 0) + 1
 
-            total_duration = (time.time() - start_time) * 1000
-            total_items = sum(counts.values())
+            elif isinstance(result, list):
+                for detection in result:
+                    label = detection.get("label", detection.get("class", "unknown"))
+                    counts[label] = counts.get(label, 0) + 1
 
-            ai_logger.info(
-                f"✅ Detection complete | items_found={total_items} | "
-                f"unique_labels={len(counts)} | items={counts} | "
-                f"duration={total_duration:.2f}ms"
-            )
-
+            ai_logger.info(f"✅ Detection complete | items={counts}")
             return counts if counts else {"unknown": 1}
 
         else:
-            ai_logger.error(
-                f"❌ HF API error | status={response.status_code} | "
-                f"response={response.text[:200]} | duration={api_duration:.2f}ms"
-            )
-            ai_logger.warning("⚠️ Using mock data due to API error")
-            return {"idly": 2, "vada": 1, "sambar": 1}
+            ai_logger.error(f"❌ HF API error | status={response.status_code}")
+            return {}
 
     except requests.exceptions.Timeout:
-        ai_logger.error(f"❌ HF API timeout after 30 seconds")
-        return {"idly": 2, "vada": 1, "sambar": 1}
+        ai_logger.error("❌ HF API timeout after 30 seconds")
+        return {}
     except Exception as e:
         ai_logger.error(f"❌ Detection exception: {str(e)}", exc_info=True)
-        return {"idly": 2, "vada": 1, "sambar": 1}
-
+        return {}
 # ========== ENDPOINTS ==========
 
 @app.get("/")
