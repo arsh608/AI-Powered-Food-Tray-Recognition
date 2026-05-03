@@ -40,7 +40,7 @@ def sample_image_with_food():
     draw = ImageDraw.Draw(img)
     draw.ellipse([100, 100, 200, 200], fill='brown')  # Idly
     draw.ellipse([300, 100, 400, 200], fill='brown')  # Another idly
-    draw.ellipse([200, 250, 280, 330], fill='golden')  # Vada
+    draw.ellipse([200, 250, 280, 330], fill='gold')  # Vada
     
     img_byte_arr = io.BytesIO()
     img.save(img_byte_arr, format='JPEG')
