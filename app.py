@@ -12,7 +12,7 @@ from typing import Dict, List, Any
 from datetime import datetime, timedelta
 from contextvars import ContextVar
 
-# ========== LOGGING CONFIGURATION ==========
+# ========== LOGGING CONFIGURATION =========
 # Create request ID for tracking individual requests
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
