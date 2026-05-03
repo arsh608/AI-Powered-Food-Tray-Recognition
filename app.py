@@ -12,14 +12,15 @@ from typing import Dict, List, Any
 from datetime import datetime, timedelta
 from contextvars import ContextVar
 
-# ========== LOGGING CONFIGURATION =========
+# ========== LOGGING CONFIGURATION ==========
 # Create request ID for tracking individual requests
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
 class RequestIdFilter(logging.Filter):
     """Add request ID to every log message"""
     def filter(self, record):
-        record.request_id = request_id_var.get()[:12]  # First 12 chars
+        # Default to empty string so loggers without a request context don't crash
+        record.request_id = request_id_var.get()[:12] if request_id_var.get() else "-"
         return True
 
 # Configure logging to stdout/stderr
@@ -44,6 +45,10 @@ error_handler.setFormatter(logging.Formatter(
 logger = logging.getLogger("food-tray-api")
 logger.addHandler(error_handler)
 logger.addFilter(RequestIdFilter())
+
+# Also add filter to root logger so uvicorn/starlette loggers get request_id too
+root_logger = logging.getLogger()
+root_logger.addFilter(RequestIdFilter())
 
 # Create specific loggers for different components
 api_logger = logging.getLogger("food-tray-api.api")
