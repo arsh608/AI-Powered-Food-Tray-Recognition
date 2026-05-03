@@ -124,7 +124,6 @@ jobs:
           docker rm $CONTAINER_NAME 2>/dev/null || true
           
           # Create log directory for CloudWatch agent (if needed)
-          mkdir -p /var/log/fastapi-app
           
           # Step 10: New container started with CloudWatch logging
           echo "🚀 Starting new container with CloudWatch logging..."
