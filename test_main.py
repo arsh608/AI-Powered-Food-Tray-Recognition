@@ -453,8 +453,15 @@ class TestIntegrationFlows:
         print("✅ Complete billing flow test passed!")
     
     def test_api_cors_headers(self):
-        """Test CORS headers are properly set"""
-        response = client.options("/health")
+        """Test CORS headers are properly set via preflight request"""
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "Content-Type",
+            }
+        )
         assert "access-control-allow-origin" in response.headers
 
 # ========== PERFORMANCE TESTS ==========
