@@ -1,4 +1,4 @@
-# Dockerfile for Food Tray Recognition System.
+# Dockerfile for Food Tray Recognition System
 # This containerizes your FastAPI application
 
 FROM python:3.9-slim
@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libgomp1 \
     wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (for better caching)
