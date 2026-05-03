@@ -1,4 +1,4 @@
-# Dockerfile for Food Tray Recognition System
+# Dockerfile for Food Tray Recognition System.
 # This containerizes your FastAPI application
 
 FROM python:3.9-slim
