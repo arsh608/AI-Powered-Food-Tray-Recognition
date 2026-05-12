@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>TrayVision | Food Billing</title>
+  <link rel="stylesheet" href="static\style.css">
+</head>
+<body>
+  <div id="app" class="app-container">
+    <!-- Role Selection Screen -->
+    <div id="roleSelection" class="screen active">
+      <div class="card">
+        <div class="logo-container">
+          <img src="{{ url_for('static', path='images/logo.png') }}" 
+              alt="TrayVision Logo"
+              class="logo">
+        </div>
+        <h1>TrayVision</h1>
+        <div class="role-buttons">
+          <button id="userRoleBtn" class="btn-sky">Login as User</button>
+          <button id="adminRoleBtn" class="btn-sky">Login as Admin</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- User Login Screen -->
+    <div id="userLoginScreen" class="screen">
+      <div class="card">
+        <button class="back-btn" data-screen="roleSelection">← Back</button>
+        <h2>User Check‑in</h2>
+        <form id="userLoginForm">
+          <div class="input-group">
+            <label>Full Name</label>
+            <input type="text" id="fullName" placeholder="Muhammad Ali" required>
+          </div>
+          <div class="input-group">
+            <label>Email</label>
+            <input type="email" id="emailUser" placeholder="name@gmail.com" required>
+            <small class="error-message" id="emailError"></small>
+          </div>
+          <div class="input-group">
+          <label>Phone Number</label>
+          <input type="tel" id="phone" placeholder="03XXXXXXXXX" maxlength="11" required>
+          <small class="error-message" id="phoneError"></small>
+        </div>
+          <button type="submit" class="btn-sky full-width">Submit & Continue</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- User Dashboard (after check-in) -->
+    <div id="userDashboardScreen" class="screen">
+      <div class="card">
+        <div class="dashboard-header">
+          <h2>Menu & Detection</h2>
+          <button id="userLogoutBtn" class="btn-outline-sm">Logout</button>
+        </div>
+        <!-- Image input options -->
+        <div class="image-input-section">
+          <div class="input-row">
+            <label>📷 Capture / Upload Image</label>
+            <div class="button-group-horizontal">
+              <label class="btn-secondary" for="imageUploadFile">📁 Upload</label>
+              <input type="file" id="imageUploadFile" accept="image/*" style="display:none">
+
+              <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
+              <button id="cameraBtn" class="btn-secondary">📸 Camera</button>
+            </div>
+          </div>
+
+          <div id="imagePreview" class="image-preview hidden">
+            <img id="previewImg" alt="preview">
+            <button id="clearImageBtn" class="clear-btn">✖ Clear</button>
+          </div>
+
+          <button id="generateBillBtn" class="btn-sky full-width mt-2" disabled>
+            Generate Bill
+          </button>
+        </div>
+
+        <!-- Bill display area -->
+        <div id="billContainer" class="bill-container hidden">
+          <h3>Your Bill</h3>
+          <div id="billItemsList" class="bill-items"></div>
+          <div class="total-row">Total Amount: <span id="totalAmount">0.00</span></div>
+          <button id="payBtn" class="btn-sky full-width mt-2">Pay & Download Bill</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin Login Screen -->
+    <div id="adminLoginScreen" class="screen">
+      <div class="card">
+        <button class="back-btn" data-screen="roleSelection">← Back</button>
+        <h2>Admin Login</h2>
+        <form id="adminLoginForm">
+          <div class="input-group">
+            <label>Username</label>
+            <input type="text" id="adminUsername" placeholder="admin" required>
+          </div>
+          <div class="input-group">
+            <label>Password</label>
+            <input type="password" id="adminPassword" placeholder="••••••" required>
+          </div>
+          <button type="submit" class="btn-sky full-width">Login</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Admin Dashboard (Food items management) -->
+    <div id="adminDashboardScreen" class="screen">
+      <div class="card wide-card">
+        <div class="dashboard-header">
+          <h2>Admin Panel — Menu Manager</h2>
+          <button id="adminLogoutBtn" class="btn-outline-sm">Logout</button>
+        </div>
+        <div class="admin-form">
+          <h3>Add New Item</h3>
+          <div class="inline-form">
+            <input type="text" id="itemName" placeholder="Item name" class="input-flex">
+            <input type="number" id="itemPrice" placeholder="Price" class="input-flex" step="0.01">
+            <select id="itemCategory" class="input-flex">
+              <option value="">Category</option>
+              <option value="food">Food</option>
+              <option value="drink">Drink</option>
+              <option value="dessert">Dessert</option>
+            </select>
+            <button id="addItemBtn" class="btn-sky">Add</button>
+          </div>
+        </div>
+
+        <!-- Analytics Section -->
+        <div class="admin-analytics card-section">
+          <h3>📊 Sales Analytics</h3>
+
+          <div class="analytics-controls">
+            <label>Time Period</label>
+            <select id="analyticsDays" class="input-flex">
+              <option value="7">Last 7 Days</option>
+              <option value="14">Last 14 Days</option>
+              <option value="30">Last 30 Days</option>
+            </select>
+
+            <button id="fetchAnalyticsBtn" class="btn-sky">
+              Get Analytics
+            </button>
+          </div>
+
+          <div id="analyticsResult" class="analytics-result hidden">
+            <div class="analytics-grid">
+              <div class="analytics-card">
+                <h4>Total Sales</h4>
+                <p id="totalSales">0</p>
+              </div>
+
+              <div class="analytics-card">
+                <h4>Orders</h4>
+                <p id="orderCount">0</p>
+              </div>
+
+              <div class="analytics-card">
+                <h4>Average Order</h4>
+                <p id="avgOrder">0</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h3>📋 Items & Price List</h3>
+        <div id="foodItemsList" class="food-items-list">
+          <!-- dynamic items will render here -->
+          <div class="loading-placeholder">Loading menu...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Global toast / message -->
+    <div id="toastMsg" class="toast hidden"></div>
+  </div>
+  <script src="static\script.js"></script>
+</body>
+</html>
